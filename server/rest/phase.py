@@ -51,6 +51,7 @@ class Phase(Resource):
         self.route('GET', (), self.listPhases)
         self.route('GET', (':id',), self.getPhase)
         self.route('GET', (':id', 'access'), self.getAccess)
+        self.route('GET', (':id', 'stats'), self.getStats)
         self.route('POST', (), self.createPhase)
         self.route('POST', (':id', 'participant'), self.joinPhase)
         self.route('PUT', (':id',), self.updatePhase)
@@ -192,6 +193,52 @@ class Phase(Resource):
     )
     def getAccess(self, phase, params):
         return self.model('phase', 'covalic').getFullAccessList(phase)
+
+    @access.public
+    @loadmodel(model='phase', plugin='covalic', level=AccessType.READ)
+    @describeRoute(
+        Description('Get statistics for a phase.')
+        .param('id', 'The ID of the phase.', paramType='path')
+        .errorResponse('ID was invalid.')
+        .errorResponse('Admin access was denied for the phase.', 403)
+    )
+    def getStats(self, phase, params):
+        participantCount = self.model('user').find({
+            'groups': phase['participantGroupId']
+        }).count()
+        submissionStats = self.model('submission', 'covalic').collection.aggregrate([
+            {
+                '$match': {
+                    'phaseId': phase['_id'],
+                    'latest': True
+                }
+            }, {
+                '$facet': {
+                    'submissionCount': [
+                        {
+                            '$count': 'count'
+                        }
+                    ],
+                    'submittingParticipantCount': [
+                        {
+                            '$group': {
+                                '_id': '$creatorId'
+                            }
+                        }, {
+                            '$count': 'count'
+                        }
+                    ]
+                }
+            }
+        ]).next()
+        submissionCount = submissionStats['submissionCount'][0]['count']
+        submittingParticipantCount = submissionStats['submittingParticipantCount'][0]['count']
+
+        return {
+            'submissionCount': submissionCount,
+            'participantCount': participantCount,
+            'submittingParticipantCount': submittingParticipantCount,
+        }
 
     @access.user
     @loadmodel(model='phase', plugin='covalic', level=AccessType.ADMIN)
